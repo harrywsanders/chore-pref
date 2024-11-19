@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useRef } from 'react';
+"use client"
+import React, { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import './App.css';
 
 // Initialize Supabase client
-const supabaseUrl = process.env.REACT_APP_SUPABASE_URL;
-const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY;
+const supabaseUrl = 'https://rzxwmyqnnwflqfhlbncz.supabase.co'; // Replace with your Supabase URL
+const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ6eHdteXFubndmbHFmaGxibmN6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzIwNDQ4NjUsImV4cCI6MjA0NzYyMDg2NX0.FecZoMOqMaErxou4pnpXvat5rZQX7WwlJzox9zaBYBo'; // Replace with your Supabase anon key
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 function App() {
@@ -13,8 +14,6 @@ function App() {
   const [chores, setChores] = useState([]);
   const [preferences, setPreferences] = useState({});
   const [loading, setLoading] = useState(false);
-
-  const debounceRef = useRef(null);
 
   // Fetch the list of chores from Supabase
   useEffect(() => {
@@ -29,42 +28,18 @@ function App() {
     fetchChores();
   }, []);
 
-  // Fetch roommate and preferences when roommateName changes, with debounce
-  useEffect(() => {
-    if (debounceRef.current) {
-      clearTimeout(debounceRef.current);
-    }
-
-    debounceRef.current = setTimeout(() => {
-      if (roommateName.trim() !== '') {
-        fetchRoommateData(roommateName.trim());
-      } else {
-        setRoommateId(null);
-        setPreferences({});
-      }
-    }, 500); // Adjust debounce time as needed
-  }, [roommateName]);
-
   // Fetch roommate and preferences by name
   const fetchRoommateData = async (name) => {
-    const trimmedName = name.trim();
-
     // Fetch roommate by name
     let { data: roommateData, error: roommateError } = await supabase
       .from('roommates')
       .select('*')
-      .eq('name', trimmedName)
-      .single(); // Use .single() since names are unique
+      .eq('name', name)
+      .single();
 
-    if (roommateError) {
-      if (roommateError.code === 'PGRST116') {
-        // No roommate found
-        setRoommateId(null);
-        setPreferences({});
-      } else {
-        console.error('Error fetching roommate:', roommateError);
-      }
-      return;
+    if (roommateError && roommateError.code !== 'PGRST116') {
+      // 'PGRST116' is 'No rows found' error code
+      console.error('Error fetching roommate:', roommateError);
     }
 
     if (roommateData) {
@@ -85,6 +60,20 @@ function App() {
         });
         setPreferences(preferencesMap);
       }
+    } else {
+      // Roommate does not exist
+      setRoommateId(null);
+      setPreferences({});
+    }
+  };
+
+  // Handle roommate name input onBlur
+  const handleRoommateNameBlur = () => {
+    if (roommateName.trim() !== '') {
+      fetchRoommateData(roommateName.trim());
+    } else {
+      setRoommateId(null);
+      setPreferences({});
     }
   };
 
@@ -101,39 +90,19 @@ function App() {
     try {
       let currentRoommateId = roommateId;
 
-      // Trim the roommate name
-      const trimmedName = roommateName.trim();
-
-      // Fetch roommate by name to check if it exists
+      // If roommate doesn't exist, insert new roommate
       if (!currentRoommateId) {
-        let { data: existingRoommate, error: fetchError } = await supabase
+        let { data: roommateData, error: roommateError } = await supabase
           .from('roommates')
-          .select('id')
-          .eq('name', trimmedName)
-          .maybeSingle();
+          .insert([{ name: roommateName }])
+          .select()
+          .single();
 
-        if (fetchError) {
-          throw fetchError;
+        if (roommateError) {
+          throw roommateError;
         }
-
-        if (existingRoommate) {
-          // Roommate exists, use existing ID
-          currentRoommateId = existingRoommate.id;
-          setRoommateId(currentRoommateId);
-        } else {
-          // Insert new roommate
-          let { data: roommateData, error: roommateError } = await supabase
-            .from('roommates')
-            .insert([{ name: trimmedName }])
-            .select()
-            .single();
-
-          if (roommateError) {
-            throw roommateError;
-          }
-          currentRoommateId = roommateData.id;
-          setRoommateId(currentRoommateId);
-        }
+        currentRoommateId = roommateData.id;
+        setRoommateId(currentRoommateId);
       }
 
       // Prepare preferences data
@@ -146,7 +115,7 @@ function App() {
       // Upsert preferences
       let { error: preferencesError } = await supabase
         .from('preferences')
-        .upsert(preferencesData, { onConflict: 'roommate_id,chore_id' });
+        .upsert(preferencesData);
 
       if (preferencesError) {
         throw preferencesError;
@@ -159,6 +128,7 @@ function App() {
     } finally {
       setLoading(false);
     }
+
   };
 
   return (
@@ -172,6 +142,7 @@ function App() {
               type="text"
               value={roommateName}
               onChange={(e) => setRoommateName(e.target.value)}
+              onBlur={handleRoommateNameBlur}
               required
             />
           </label>
